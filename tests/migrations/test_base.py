@@ -65,6 +65,16 @@ class MigrationTestBase(TransactionTestCase):
     def assertColumnNotNull(self, table, column, using="default"):
         self.assertFalse(self._get_column_allows_null(table, column, using))
 
+    def _get_column_collation(self, table, column, using):
+        return next(
+            f.collation
+            for f in self.get_table_description(table, using=using)
+            if f.name == column
+        )
+
+    def assertColumnCollation(self, table, column, collation, using="default"):
+        self.assertEqual(self._get_column_collation(table, column, using), collation)
+
     def assertIndexExists(
         self, table, columns, value=True, using="default", index_type=None
     ):
@@ -245,7 +255,7 @@ class OperationTestBase(MigrationTestBase):
         unique_together=False,
         options=False,
         db_table=None,
-        index_together=False,
+        index_together=False,  # RemovedInDjango51Warning.
         constraints=None,
         indexes=None,
     ):
@@ -253,6 +263,7 @@ class OperationTestBase(MigrationTestBase):
         # Make the "current" state.
         model_options = {
             "swappable": "TEST_SWAP_MODEL",
+            # RemovedInDjango51Warning.
             "index_together": [["weight", "pink"]] if index_together else [],
             "unique_together": [["pink", "weight"]] if unique_together else [],
         }

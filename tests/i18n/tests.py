@@ -865,11 +865,14 @@ class FormattingTests(SimpleTestCase):
         self.maxDiff = 3000
         # Catalan locale
         with translation.override("ca", deactivate=True):
-            self.assertEqual(r"j \d\e F \d\e Y", get_format("DATE_FORMAT"))
+            self.assertEqual(r"j E \d\e Y", get_format("DATE_FORMAT"))
             self.assertEqual(1, get_format("FIRST_DAY_OF_WEEK"))
             self.assertEqual(",", get_format("DECIMAL_SEPARATOR"))
             self.assertEqual("10:15", time_format(self.t))
             self.assertEqual("31 de desembre de 2009", date_format(self.d))
+            self.assertEqual(
+                "1 d'abril de 2009", date_format(datetime.date(2009, 4, 1))
+            )
             self.assertEqual(
                 "desembre del 2009", date_format(self.d, "YEAR_MONTH_FORMAT")
             )
@@ -1515,6 +1518,9 @@ class FormattingTests(SimpleTestCase):
         with translation.override("de", deactivate=True):
             self.assertEqual(".", get_format("DECIMAL_SEPARATOR", lang="en"))
 
+    def test_get_format_lazy_format(self):
+        self.assertEqual(get_format(gettext_lazy("DATE_FORMAT")), "N j, Y")
+
     def test_localize_templatetag_and_filter(self):
         """
         Test the {% localize %} templatetag and the localize/unlocalize filters.
@@ -1896,9 +1902,10 @@ class MiscTests(SimpleTestCase):
         USE_I18N=True,
         LANGUAGES=[
             ("en", "English"),
+            ("ar-dz", "Algerian Arabic"),
             ("de", "German"),
             ("de-at", "Austrian German"),
-            ("pt-br", "Portuguese (Brazil)"),
+            ("pt-BR", "Portuguese (Brazil)"),
         ],
     )
     def test_get_supported_language_variant_real(self):
@@ -1909,8 +1916,11 @@ class MiscTests(SimpleTestCase):
         self.assertEqual(g("de-at"), "de-at")
         self.assertEqual(g("de-ch"), "de")
         self.assertEqual(g("pt-br"), "pt-br")
+        self.assertEqual(g("pt-BR"), "pt-BR")
         self.assertEqual(g("pt"), "pt-br")
         self.assertEqual(g("pt-pt"), "pt-br")
+        self.assertEqual(g("ar-dz"), "ar-dz")
+        self.assertEqual(g("ar-DZ"), "ar-DZ")
         with self.assertRaises(LookupError):
             g("pt", strict=True)
         with self.assertRaises(LookupError):
@@ -1940,7 +1950,6 @@ class MiscTests(SimpleTestCase):
         LANGUAGES=[
             ("en", "English"),
             ("en-latn-us", "Latin English"),
-            ("en-Latn-US", "BCP 47 case format"),
             ("de", "German"),
             ("de-1996", "German, orthography of 1996"),
             ("de-at", "Austrian German"),
@@ -1964,6 +1973,7 @@ class MiscTests(SimpleTestCase):
             ("/de/", "de"),
             ("/de-1996/", "de-1996"),
             ("/de-at/", "de-at"),
+            ("/de-AT/", "de-AT"),
             ("/de-ch/", "de"),
             ("/de-ch-1901/", "de-ch-1901"),
             ("/de-simple-page-test/", None),
@@ -2355,7 +2365,7 @@ class WatchForTranslationChangesTests(SimpleTestCase):
 
     def test_i18n_app_dirs(self):
         mocked_sender = mock.MagicMock()
-        with self.settings(INSTALLED_APPS=["tests.i18n.sampleproject"]):
+        with self.settings(INSTALLED_APPS=["i18n.sampleproject"]):
             watch_for_translation_changes(mocked_sender)
         project_dir = Path(__file__).parent / "sampleproject" / "locale"
         mocked_sender.watch_dir.assert_any_call(project_dir, "**/*.mo")

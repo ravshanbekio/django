@@ -30,6 +30,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core import mail
 from django.core.checks import Error
 from django.core.files import temp as tempfile
+from django.db import connection
 from django.forms.utils import ErrorList
 from django.template.response import TemplateResponse
 from django.test import (
@@ -2692,6 +2693,20 @@ class AdminViewPermissionsTest(TestCase):
         self.assertEqual(len(response.context["inline_admin_formsets"]), 1)
         formset = response.context["inline_admin_formsets"][0]
         self.assertEqual(len(formset.forms), 3)
+
+    def test_change_view_with_view_only_last_inline(self):
+        self.viewuser.user_permissions.add(
+            get_perm(Section, get_permission_codename("view", Section._meta))
+        )
+        self.client.force_login(self.viewuser)
+        response = self.client.get(
+            reverse("admin:admin_views_section_change", args=(self.s1.pk,))
+        )
+        self.assertEqual(len(response.context["inline_admin_formsets"]), 1)
+        formset = response.context["inline_admin_formsets"][0]
+        self.assertEqual(len(formset.forms), 3)
+        # The last inline is not marked as empty.
+        self.assertContains(response, 'id="article_set-2"')
 
     def test_change_view_with_view_and_add_inlines(self):
         """User has view and add permissions on the inline model."""
@@ -7022,7 +7037,8 @@ class UserAdminTest(TestCase):
         # Don't depend on a warm cache, see #17377.
         ContentType.objects.clear_cache()
 
-        with self.assertNumQueries(10):
+        expected_num_queries = 10 if connection.features.uses_savepoints else 8
+        with self.assertNumQueries(expected_num_queries):
             response = self.client.get(reverse("admin:auth_user_change", args=(u.pk,)))
             self.assertEqual(response.status_code, 200)
 
@@ -7069,7 +7085,8 @@ class GroupAdminTest(TestCase):
         # Ensure no queries are skipped due to cached content type for Group.
         ContentType.objects.clear_cache()
 
-        with self.assertNumQueries(8):
+        expected_num_queries = 8 if connection.features.uses_savepoints else 6
+        with self.assertNumQueries(expected_num_queries):
             response = self.client.get(reverse("admin:auth_group_change", args=(g.pk,)))
             self.assertEqual(response.status_code, 200)
 

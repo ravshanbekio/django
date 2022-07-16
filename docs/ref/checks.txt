@@ -83,6 +83,7 @@ Django's system checks are organized using the following tags:
   you specify configured database aliases using the ``--database`` option when
   calling the :djadmin:`check` command.
 * ``files``: Checks files related configuration.
+* ``migrations``: Checks of migration operations.
 * ``models``: Checks of model, field, and manager definitions.
 * ``security``: Checks security related configuration.
 * ``signals``: Checks on signal declarations and handler registrations.
@@ -94,9 +95,9 @@ Django's system checks are organized using the following tags:
 
 Some checks may be registered with multiple tags.
 
-.. versionchanged:: 4.0
+.. versionchanged:: 4.2
 
-    The ``files`` tag was added.
+    The ``migrations`` tag was added.
 
 Core system checks
 ==================
@@ -156,8 +157,6 @@ If you're using MySQL or MariaDB, the following checks will be performed:
 
 Managing files
 --------------
-
-.. versionadded:: 4.0
 
 The following checks verify your setup for :doc:`/topics/files`:
 
@@ -395,6 +394,14 @@ Models
 * **models.W043**: ``<database>`` does not support indexes on expressions.
 * **models.W044**: ``<database>`` does not support unique constraints on
   expressions.
+* **models.W045**: Check constraint ``<constraint>`` contains ``RawSQL()``
+  expression and won't be validated during the model ``full_clean()``.
+
+Migrations
+----------
+
+* **migrations.W001**: ``AlterIndexTogether`` is deprecated. Support for it
+  (except in historical migrations) will be removed in Django 5.1.
 
 Security
 --------

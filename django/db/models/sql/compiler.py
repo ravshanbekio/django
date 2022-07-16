@@ -548,6 +548,11 @@ class SQLCompiler:
                         or not features.supports_slicing_ordering_in_compound
                     ):
                         part_sql = "({})".format(part_sql)
+                elif (
+                    self.query.subquery
+                    and features.supports_slicing_ordering_in_compound
+                ):
+                    part_sql = "({})".format(part_sql)
                 parts += ((part_sql, part_args),)
             except EmptyResultSet:
                 # Omit the empty queryset with UNION and with DIFFERENCE if the
@@ -912,10 +917,15 @@ class SQLCompiler:
                 ):
                     item = item.desc() if descending else item.asc()
                 if isinstance(item, OrderBy):
-                    results.append((item, False))
+                    results.append(
+                        (item.prefix_references(f"{name}{LOOKUP_SEP}"), False)
+                    )
                     continue
                 results.extend(
-                    self.find_ordering_name(item, opts, alias, order, already_seen)
+                    (expr.prefix_references(f"{name}{LOOKUP_SEP}"), is_ref)
+                    for expr, is_ref in self.find_ordering_name(
+                        item, opts, alias, order, already_seen
+                    )
                 )
             return results
         targets, alias, _ = self.query.trim_joins(targets, joins, path)
@@ -1434,9 +1444,8 @@ class SQLCompiler:
         result = list(self.execute_sql())
         # Some backends return 1 item tuples with strings, and others return
         # tuples with integers and strings. Flatten them out into strings.
-        output_formatter = (
-            json.dumps if self.query.explain_info.format == "json" else str
-        )
+        format_ = self.query.explain_info.format
+        output_formatter = json.dumps if format_ and format_.lower() == "json" else str
         for row in result[0]:
             if not isinstance(row, str):
                 yield " ".join(output_formatter(c) for c in row)

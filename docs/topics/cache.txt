@@ -149,6 +149,15 @@ on the IP addresses 172.19.26.240 (port 11211), 172.19.26.242 (port 11212), and
         }
     }
 
+By default, the ``PyMemcacheCache`` backend sets the following options (you can
+override them in your :setting:`OPTIONS <CACHES-OPTIONS>`)::
+
+    'OPTIONS': {
+        'allow_unicode_keys': True,
+        'default_noreply': False,
+        'serde': pymemcache.serde.pickle_serde,
+    }
+
 A final point about Memcached is that memory-based caching has a
 disadvantage: because the cached data is stored in memory, the data will be
 lost if your server crashes. Clearly, memory isn't intended for permanent data
@@ -162,8 +171,6 @@ particularly temporary.
 
 Redis
 -----
-
-.. versionadded:: 4.0
 
 Redis__ is an in-memory database that can be used for caching. To begin you'll
 need a Redis server running either locally or on a remote machine.
@@ -1074,10 +1081,6 @@ the cache backend.
     ``cache.aadd()`` or ``cache.adelete_many()``. See `Asynchronous support`_
     for more details.
 
-.. versionchanged:: 4.0
-
-    The async variants of methods were added to the ``BaseCache``.
-
 .. _cache_key_prefixing:
 
 Cache key prefixing
@@ -1208,8 +1211,6 @@ instance, to do this for the ``locmem`` backend, put this code in a module::
 
 Asynchronous support
 ====================
-
-.. versionadded:: 4.0
 
 Django has developing support for asynchronous cache backends, but does not
 yet support asynchronous caching. It will be coming in a future release.

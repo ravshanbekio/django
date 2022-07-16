@@ -41,14 +41,16 @@ class ExplainTests(TestCase):
                         )
                         self.assertIsInstance(result, str)
                         self.assertTrue(result)
-                        if format == "xml":
+                        if not format:
+                            continue
+                        if format.lower() == "xml":
                             try:
                                 xml.etree.ElementTree.fromstring(result)
                             except xml.etree.ElementTree.ParseError as e:
                                 self.fail(
                                     f"QuerySet.explain() result is not valid XML: {e}"
                                 )
-                        elif format == "json":
+                        elif format.lower() == "json":
                             try:
                                 json.loads(result)
                             except json.JSONDecodeError as e:
@@ -80,9 +82,8 @@ class ExplainTests(TestCase):
             {"verbose": True, "timing": True, "analyze": True},
             {"verbose": False, "timing": False, "analyze": True},
             {"summary": True},
+            {"settings": True},
         ]
-        if connection.features.is_postgresql_12:
-            test_options.append({"settings": True})
         if connection.features.is_postgresql_13:
             test_options.append({"analyze": True, "wal": True})
         for options in test_options:

@@ -27,6 +27,7 @@ from django.db.models.expressions import (
     OuterRef,
     Ref,
     ResolvedOuterRef,
+    Value,
 )
 from django.db.models.fields import Field
 from django.db.models.fields.related_lookups import MultiColSource
@@ -318,7 +319,7 @@ class Query(BaseExpression):
     def clone(self):
         """
         Return a copy of the current Query. A lightweight alternative to
-        to deepcopy().
+        deepcopy().
         """
         obj = Empty()
         obj.__class__ = self.__class__
@@ -582,8 +583,7 @@ class Query(BaseExpression):
         q.clear_ordering(force=True)
         if limit:
             q.set_limits(high=1)
-        q.add_extra({"a": 1}, None, None, None, None, None)
-        q.set_extra_mask(["a"])
+        q.add_annotation(Value(1), "a")
         return q
 
     def has_results(self, using):
@@ -748,6 +748,7 @@ class Query(BaseExpression):
                     cur_model = source.related_model
                 else:
                     cur_model = source.remote_field.model
+                cur_model = cur_model._meta.concrete_model
                 opts = cur_model._meta
                 # Even if we're "just passing through" this model, we must add
                 # both the current model's pk and the related reference field
@@ -1178,6 +1179,8 @@ class Query(BaseExpression):
             and not connection.features.ignores_unnecessary_order_by_in_subqueries
         ):
             self.clear_ordering(force=False)
+            for query in self.combined_queries:
+                query.clear_ordering(force=False)
         sql, params = self.get_compiler(connection=connection).as_sql()
         if self.subquery:
             sql = "(%s)" % sql

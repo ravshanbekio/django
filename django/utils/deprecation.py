@@ -5,15 +5,16 @@ import warnings
 from asgiref.sync import sync_to_async
 
 
-class RemovedInNextVersionWarning(DeprecationWarning):
+class RemovedInDjango50Warning(DeprecationWarning):
     pass
 
 
-class RemovedInDjango50Warning(PendingDeprecationWarning):
+class RemovedInDjango51Warning(PendingDeprecationWarning):
     pass
 
 
-RemovedAfterNextVersionWarning = RemovedInDjango50Warning
+RemovedInNextVersionWarning = RemovedInDjango50Warning
+RemovedAfterNextVersionWarning = RemovedInDjango51Warning
 
 
 class warn_about_renamed_method:
@@ -26,7 +27,7 @@ class warn_about_renamed_method:
         self.deprecation_warning = deprecation_warning
 
     def __call__(self, f):
-        def wrapped(*args, **kwargs):
+        def wrapper(*args, **kwargs):
             warnings.warn(
                 "`%s.%s` is deprecated, use `%s` instead."
                 % (self.class_name, self.old_method_name, self.new_method_name),
@@ -35,7 +36,7 @@ class warn_about_renamed_method:
             )
             return f(*args, **kwargs)
 
-        return wrapped
+        return wrapper
 
 
 class RenameMethodsBase(type):
@@ -156,3 +157,42 @@ class MiddlewareMixin:
                 thread_sensitive=True,
             )(request, response)
         return response
+
+
+class DeprecationForHistoricalMigrationMixin:
+    system_check_deprecated_details = None
+    system_check_removed_details = None
+    check_type = ""
+
+    def check_deprecation_details(self):
+        from django.core import checks
+
+        if self.system_check_removed_details is not None:
+            return [
+                checks.Error(
+                    self.system_check_removed_details.get(
+                        "msg",
+                        "%s has been removed except for support in historical "
+                        "migrations." % self.__class__.__name__,
+                    ),
+                    hint=self.system_check_removed_details.get("hint"),
+                    obj=self,
+                    id=self.system_check_removed_details.get(
+                        "id", f"{self.check_type}.EXXX"
+                    ),
+                )
+            ]
+        elif self.system_check_deprecated_details is not None:
+            return [
+                checks.Warning(
+                    self.system_check_deprecated_details.get(
+                        "msg", "%s has been deprecated." % self.__class__.__name__
+                    ),
+                    hint=self.system_check_deprecated_details.get("hint"),
+                    obj=self,
+                    id=self.system_check_deprecated_details.get(
+                        "id", f"{self.check_type}.WXXX"
+                    ),
+                )
+            ]
+        return []

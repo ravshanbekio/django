@@ -828,46 +828,56 @@ class MigrateTests(MigrationTestBase):
         """
         out = io.StringIO()
         call_command("sqlmigrate", "migrations", "0001", stdout=out)
-        output = out.getvalue().lower()
 
-        index_tx_start = output.find(connection.ops.start_transaction_sql().lower())
-        index_op_desc_author = output.find("-- create model author")
-        index_create_table = output.find("create table")
-        index_op_desc_tribble = output.find("-- create model tribble")
-        index_op_desc_unique_together = output.find("-- alter unique_together")
-        index_tx_end = output.find(connection.ops.end_transaction_sql().lower())
+        lines = out.getvalue().splitlines()
 
         if connection.features.can_rollback_ddl:
-            self.assertGreater(index_tx_start, -1, "Transaction start not found")
-            self.assertGreater(
-                index_tx_end,
-                index_op_desc_unique_together,
-                "Transaction end not found or found before operation description "
-                "(unique_together)",
-            )
+            self.assertEqual(lines[0], connection.ops.start_transaction_sql())
+            self.assertEqual(lines[-1], connection.ops.end_transaction_sql())
+            lines = lines[1:-1]
 
-        self.assertGreater(
-            index_op_desc_author,
-            index_tx_start,
-            "Operation description (author) not found or found before transaction "
-            "start",
+        self.assertEqual(
+            lines[:3],
+            [
+                "--",
+                "-- Create model Author",
+                "--",
+            ],
         )
-        self.assertGreater(
-            index_create_table,
-            index_op_desc_author,
-            "CREATE TABLE not found or found before operation description (author)",
+        self.assertIn(
+            "create table %s" % connection.ops.quote_name("migrations_author").lower(),
+            lines[3].lower(),
         )
-        self.assertGreater(
-            index_op_desc_tribble,
-            index_create_table,
-            "Operation description (tribble) not found or found before CREATE TABLE "
-            "(author)",
+        pos = lines.index("--", 3)
+        self.assertEqual(
+            lines[pos : pos + 3],
+            [
+                "--",
+                "-- Create model Tribble",
+                "--",
+            ],
         )
-        self.assertGreater(
-            index_op_desc_unique_together,
-            index_op_desc_tribble,
-            "Operation description (unique_together) not found or found before "
-            "operation description (tribble)",
+        self.assertIn(
+            "create table %s" % connection.ops.quote_name("migrations_tribble").lower(),
+            lines[pos + 3].lower(),
+        )
+        pos = lines.index("--", pos + 3)
+        self.assertEqual(
+            lines[pos : pos + 3],
+            [
+                "--",
+                "-- Add field bool to tribble",
+                "--",
+            ],
+        )
+        pos = lines.index("--", pos + 3)
+        self.assertEqual(
+            lines[pos : pos + 3],
+            [
+                "--",
+                "-- Alter unique_together for author (1 constraint(s))",
+                "--",
+            ],
         )
 
     @override_settings(MIGRATION_MODULES={"migrations": "migrations.test_migrations"})
@@ -880,49 +890,70 @@ class MigrateTests(MigrationTestBase):
 
         out = io.StringIO()
         call_command("sqlmigrate", "migrations", "0001", stdout=out, backwards=True)
-        output = out.getvalue().lower()
 
-        index_tx_start = output.find(connection.ops.start_transaction_sql().lower())
-        index_op_desc_unique_together = output.find("-- alter unique_together")
-        index_op_desc_tribble = output.find("-- create model tribble")
-        index_op_desc_author = output.find("-- create model author")
-        index_drop_table = output.rfind("drop table")
-        index_tx_end = output.find(connection.ops.end_transaction_sql().lower())
+        lines = out.getvalue().splitlines()
+        try:
+            if connection.features.can_rollback_ddl:
+                self.assertEqual(lines[0], connection.ops.start_transaction_sql())
+                self.assertEqual(lines[-1], connection.ops.end_transaction_sql())
+                lines = lines[1:-1]
 
-        if connection.features.can_rollback_ddl:
-            self.assertGreater(index_tx_start, -1, "Transaction start not found")
-            self.assertGreater(
-                index_tx_end,
-                index_op_desc_unique_together,
-                "Transaction end not found or found before DROP TABLE",
+            self.assertEqual(
+                lines[:3],
+                [
+                    "--",
+                    "-- Alter unique_together for author (1 constraint(s))",
+                    "--",
+                ],
             )
-        self.assertGreater(
-            index_op_desc_unique_together,
-            index_tx_start,
-            "Operation description (unique_together) not found or found before "
-            "transaction start",
-        )
-        self.assertGreater(
-            index_op_desc_tribble,
-            index_op_desc_unique_together,
-            "Operation description (tribble) not found or found before operation "
-            "description (unique_together)",
-        )
-        self.assertGreater(
-            index_op_desc_author,
-            index_op_desc_tribble,
-            "Operation description (author) not found or found before operation "
-            "description (tribble)",
-        )
-
-        self.assertGreater(
-            index_drop_table,
-            index_op_desc_author,
-            "DROP TABLE not found or found before operation description (author)",
-        )
-
-        # Cleanup by unmigrating everything
-        call_command("migrate", "migrations", "zero", verbosity=0)
+            pos = lines.index("--", 3)
+            self.assertEqual(
+                lines[pos : pos + 3],
+                [
+                    "--",
+                    "-- Add field bool to tribble",
+                    "--",
+                ],
+            )
+            pos = lines.index("--", pos + 3)
+            self.assertEqual(
+                lines[pos : pos + 3],
+                [
+                    "--",
+                    "-- Create model Tribble",
+                    "--",
+                ],
+            )
+            next_pos = lines.index("--", pos + 3)
+            drop_table_sql = (
+                "drop table %s"
+                % connection.ops.quote_name("migrations_tribble").lower()
+            )
+            for line in lines[pos + 3 : next_pos]:
+                if drop_table_sql in line.lower():
+                    break
+            else:
+                self.fail("DROP TABLE (tribble) not found.")
+            pos = next_pos
+            self.assertEqual(
+                lines[pos : pos + 3],
+                [
+                    "--",
+                    "-- Create model Author",
+                    "--",
+                ],
+            )
+            drop_table_sql = (
+                "drop table %s" % connection.ops.quote_name("migrations_author").lower()
+            )
+            for line in lines[pos + 3 :]:
+                if drop_table_sql in line.lower():
+                    break
+            else:
+                self.fail("DROP TABLE (author) not found.")
+        finally:
+            # Unmigrate everything.
+            call_command("migrate", "migrations", "zero", verbosity=0)
 
     @override_settings(
         MIGRATION_MODULES={"migrations": "migrations.test_migrations_non_atomic"}
@@ -990,10 +1021,50 @@ class MigrateTests(MigrationTestBase):
     @override_settings(
         MIGRATION_MODULES={"migrations": "migrations.test_migrations_no_operations"}
     )
-    def test_migrations_no_operations(self):
+    def test_sqlmigrate_no_operations(self):
         err = io.StringIO()
         call_command("sqlmigrate", "migrations", "0001_initial", stderr=err)
         self.assertEqual(err.getvalue(), "No operations found.\n")
+
+    @override_settings(
+        MIGRATION_MODULES={"migrations": "migrations.test_migrations_noop"}
+    )
+    def test_sqlmigrate_noop(self):
+        out = io.StringIO()
+        call_command("sqlmigrate", "migrations", "0001", stdout=out)
+        lines = out.getvalue().splitlines()
+
+        if connection.features.can_rollback_ddl:
+            lines = lines[1:-1]
+        self.assertEqual(
+            lines,
+            [
+                "--",
+                "-- Raw SQL operation",
+                "--",
+                "-- (no-op)",
+            ],
+        )
+
+    @override_settings(
+        MIGRATION_MODULES={"migrations": "migrations.test_migrations_manual_porting"}
+    )
+    def test_sqlmigrate_unrepresentable(self):
+        out = io.StringIO()
+        call_command("sqlmigrate", "migrations", "0002", stdout=out)
+        lines = out.getvalue().splitlines()
+
+        if connection.features.can_rollback_ddl:
+            lines = lines[1:-1]
+        self.assertEqual(
+            lines,
+            [
+                "--",
+                "-- Raw Python operation",
+                "--",
+                "-- THIS OPERATION CANNOT BE WRITTEN AS SQL",
+            ],
+        )
 
     @override_settings(
         INSTALLED_APPS=[
@@ -2512,6 +2583,108 @@ class MakeMigrationsTests(MigrationTestBase):
                 )
             out_value = out.getvalue()
             self.assertIn("0003_auto", out_value)
+
+    def test_makemigrations_update(self):
+        with self.temporary_migration_module(
+            module="migrations.test_migrations"
+        ) as migration_dir:
+            migration_file = os.path.join(migration_dir, "0002_second.py")
+            with open(migration_file) as fp:
+                initial_content = fp.read()
+
+            with captured_stdout() as out:
+                call_command("makemigrations", "migrations", update=True)
+            self.assertFalse(
+                any(
+                    filename.startswith("0003")
+                    for filename in os.listdir(migration_dir)
+                )
+            )
+            self.assertIs(os.path.exists(migration_file), False)
+            new_migration_file = os.path.join(
+                migration_dir,
+                "0002_delete_tribble_author_rating_modelwithcustombase_and_more.py",
+            )
+            with open(new_migration_file) as fp:
+                self.assertNotEqual(initial_content, fp.read())
+            self.assertIn(f"Deleted {migration_file}", out.getvalue())
+
+    def test_makemigrations_update_existing_name(self):
+        with self.temporary_migration_module(
+            module="migrations.test_auto_now_add"
+        ) as migration_dir:
+            migration_file = os.path.join(migration_dir, "0001_initial.py")
+            with open(migration_file) as fp:
+                initial_content = fp.read()
+
+            with captured_stdout() as out:
+                call_command("makemigrations", "migrations", update=True)
+            self.assertIs(os.path.exists(migration_file), False)
+            new_migration_file = os.path.join(
+                migration_dir,
+                "0001_initial_updated.py",
+            )
+            with open(new_migration_file) as fp:
+                self.assertNotEqual(initial_content, fp.read())
+            self.assertIn(f"Deleted {migration_file}", out.getvalue())
+
+    def test_makemigrations_update_applied_migration(self):
+        recorder = MigrationRecorder(connection)
+        recorder.record_applied("migrations", "0001_initial")
+        recorder.record_applied("migrations", "0002_second")
+        with self.temporary_migration_module(module="migrations.test_migrations"):
+            msg = "Cannot update applied migration 'migrations.0002_second'."
+            with self.assertRaisesMessage(CommandError, msg):
+                call_command("makemigrations", "migrations", update=True)
+
+    def test_makemigrations_update_no_migration(self):
+        with self.temporary_migration_module(module="migrations.test_migrations_empty"):
+            msg = "App migrations has no migration, cannot update last migration."
+            with self.assertRaisesMessage(CommandError, msg):
+                call_command("makemigrations", "migrations", update=True)
+
+    def test_makemigrations_update_squash_migration(self):
+        with self.temporary_migration_module(
+            module="migrations.test_migrations_squashed"
+        ):
+            msg = "Cannot update squash migration 'migrations.0001_squashed_0002'."
+            with self.assertRaisesMessage(CommandError, msg):
+                call_command("makemigrations", "migrations", update=True)
+
+    def test_makemigrations_update_manual_porting(self):
+        with self.temporary_migration_module(
+            module="migrations.test_migrations_plan"
+        ) as migration_dir:
+            with captured_stdout() as out:
+                call_command("makemigrations", "migrations", update=True)
+            # Previous migration exists.
+            previous_migration_file = os.path.join(migration_dir, "0005_fifth.py")
+            self.assertIs(os.path.exists(previous_migration_file), True)
+            # New updated migration exists.
+            files = [f for f in os.listdir(migration_dir) if f.startswith("0005_auto")]
+            updated_migration_file = os.path.join(migration_dir, files[0])
+            self.assertIs(os.path.exists(updated_migration_file), True)
+            self.assertIn(
+                f"Updated migration {updated_migration_file} requires manual porting.\n"
+                f"Previous migration {previous_migration_file} was kept and must be "
+                f"deleted after porting functions manually.",
+                out.getvalue(),
+            )
+
+    @override_settings(
+        INSTALLED_APPS=[
+            "migrations.migrations_test_apps.alter_fk.author_app",
+            "migrations.migrations_test_apps.alter_fk.book_app",
+        ]
+    )
+    def test_makemigrations_update_dependency_migration(self):
+        with self.temporary_migration_module(app_label="book_app"):
+            msg = (
+                "Cannot update migration 'book_app.0001_initial' that migrations "
+                "'author_app.0002_alter_id' depend on."
+            )
+            with self.assertRaisesMessage(CommandError, msg):
+                call_command("makemigrations", "book_app", update=True)
 
 
 class SquashMigrationsTests(MigrationTestBase):

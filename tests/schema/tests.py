@@ -53,8 +53,14 @@ from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Abs, Cast, Collate, Lower, Random, Upper
 from django.db.models.indexes import IndexExpression
 from django.db.transaction import TransactionManagementError, atomic
-from django.test import TransactionTestCase, skipIfDBFeature, skipUnlessDBFeature
+from django.test import (
+    TransactionTestCase,
+    ignore_warnings,
+    skipIfDBFeature,
+    skipUnlessDBFeature,
+)
 from django.test.utils import CaptureQueriesContext, isolate_apps, register_lookup
+from django.utils.deprecation import RemovedInDjango51Warning
 
 from .fields import CustomManyToManyField, InheritedManyToManyField, MediumBlobField
 from .models import (
@@ -64,7 +70,6 @@ from .models import (
     AuthorWithDefaultHeight,
     AuthorWithEvenLongerName,
     AuthorWithIndexedName,
-    AuthorWithIndexedNameAndBirthday,
     AuthorWithUniqueName,
     AuthorWithUniqueNameAndBirthday,
     Book,
@@ -79,7 +84,6 @@ from .models import (
     Note,
     NoteRename,
     Tag,
-    TagIndexed,
     TagM2MTest,
     TagUniqueRename,
     Thing,
@@ -114,7 +118,6 @@ class SchemaTests(TransactionTestCase):
         Node,
         Note,
         Tag,
-        TagIndexed,
         TagM2MTest,
         TagUniqueRename,
         Thing,
@@ -972,6 +975,38 @@ class SchemaTests(TransactionTestCase):
             # Update the parent FK to create a deferred constraint check.
             Node.objects.update(parent=parent)
             editor.alter_field(Node, old_field, new_field, strict=True)
+
+    @isolate_apps("schema")
+    def test_alter_null_with_default_value_deferred_constraints(self):
+        class Publisher(Model):
+            class Meta:
+                app_label = "schema"
+
+        class Article(Model):
+            publisher = ForeignKey(Publisher, CASCADE)
+            title = CharField(max_length=50, null=True)
+            description = CharField(max_length=100, null=True)
+
+            class Meta:
+                app_label = "schema"
+
+        with connection.schema_editor() as editor:
+            editor.create_model(Publisher)
+            editor.create_model(Article)
+        self.isolated_local_models = [Article, Publisher]
+
+        publisher = Publisher.objects.create()
+        Article.objects.create(publisher=publisher)
+
+        old_title = Article._meta.get_field("title")
+        new_title = CharField(max_length=50, null=False, default="")
+        new_title.set_attributes_from_name("title")
+        old_description = Article._meta.get_field("description")
+        new_description = CharField(max_length=100, null=False, default="")
+        new_description.set_attributes_from_name("description")
+        with connection.schema_editor() as editor:
+            editor.alter_field(Article, old_title, new_title, strict=True)
+            editor.alter_field(Article, old_description, new_description, strict=True)
 
     def test_alter_text_field_to_date_field(self):
         """
@@ -2859,6 +2894,7 @@ class SchemaTests(TransactionTestCase):
             with self.assertRaises(DatabaseError):
                 editor.add_constraint(Author, constraint)
 
+    @ignore_warnings(category=RemovedInDjango51Warning)
     def test_index_together(self):
         """
         Tests removing and adding index_together constraints on a model.
@@ -2902,6 +2938,7 @@ class SchemaTests(TransactionTestCase):
             False,
         )
 
+    @ignore_warnings(category=RemovedInDjango51Warning)
     def test_index_together_with_fk(self):
         """
         Tests removing and adding index_together constraints that include
@@ -2920,13 +2957,25 @@ class SchemaTests(TransactionTestCase):
         with connection.schema_editor() as editor:
             editor.alter_index_together(Book, [["author", "title"]], [])
 
+    @ignore_warnings(category=RemovedInDjango51Warning)
+    @isolate_apps("schema")
     def test_create_index_together(self):
         """
         Tests creating models with index_together already defined
         """
+
+        class TagIndexed(Model):
+            title = CharField(max_length=255)
+            slug = SlugField(unique=True)
+
+            class Meta:
+                app_label = "schema"
+                index_together = [["slug", "title"]]
+
         # Create the table
         with connection.schema_editor() as editor:
             editor.create_model(TagIndexed)
+        self.isolated_local_models = [TagIndexed]
         # Ensure there is an index
         self.assertIs(
             any(
@@ -2938,10 +2987,20 @@ class SchemaTests(TransactionTestCase):
         )
 
     @skipUnlessDBFeature("allows_multiple_constraints_on_same_fields")
+    @ignore_warnings(category=RemovedInDjango51Warning)
+    @isolate_apps("schema")
     def test_remove_index_together_does_not_remove_meta_indexes(self):
+        class AuthorWithIndexedNameAndBirthday(Model):
+            name = CharField(max_length=255)
+            birthday = DateField()
+
+            class Meta:
+                app_label = "schema"
+                index_together = [["name", "birthday"]]
+
         with connection.schema_editor() as editor:
             editor.create_model(AuthorWithIndexedNameAndBirthday)
-        self.local_models = [AuthorWithIndexedNameAndBirthday]
+        self.isolated_local_models = [AuthorWithIndexedNameAndBirthday]
         # Add the custom index
         index = Index(fields=["name", "birthday"], name="author_name_birthday_idx")
         custom_index_name = index.name
@@ -3583,6 +3642,21 @@ class SchemaTests(TransactionTestCase):
             self.get_indexes(Tag._meta.db_table),
         )
         self.assertEqual(self.get_primary_key(Tag._meta.db_table), "slug")
+
+    def test_alter_primary_key_the_same_name(self):
+        with connection.schema_editor() as editor:
+            editor.create_model(Thing)
+
+        old_field = Thing._meta.get_field("when")
+        new_field = CharField(max_length=2, primary_key=True)
+        new_field.set_attributes_from_name("when")
+        new_field.model = Thing
+        with connection.schema_editor() as editor:
+            editor.alter_field(Thing, old_field, new_field, strict=True)
+        self.assertEqual(self.get_primary_key(Thing._meta.db_table), "when")
+        with connection.schema_editor() as editor:
+            editor.alter_field(Thing, new_field, old_field, strict=True)
+        self.assertEqual(self.get_primary_key(Thing._meta.db_table), "when")
 
     def test_context_manager_exit(self):
         """
@@ -4592,6 +4666,31 @@ class SchemaTests(TransactionTestCase):
         with connection.schema_editor() as editor:
             editor.alter_field(Author, new_field, old_field, strict=True)
         self.assertIsNone(self.get_column_collation(Author._meta.db_table, "name"))
+
+    @skipUnlessDBFeature("supports_collation_on_charfield")
+    def test_alter_primary_key_db_collation(self):
+        collation = connection.features.test_collations.get("non_default")
+        if not collation:
+            self.skipTest("Language collations are not supported.")
+
+        with connection.schema_editor() as editor:
+            editor.create_model(Thing)
+
+        old_field = Thing._meta.get_field("when")
+        new_field = CharField(max_length=1, db_collation=collation, primary_key=True)
+        new_field.set_attributes_from_name("when")
+        new_field.model = Thing
+        with connection.schema_editor() as editor:
+            editor.alter_field(Thing, old_field, new_field, strict=True)
+        self.assertEqual(self.get_primary_key(Thing._meta.db_table), "when")
+        self.assertEqual(
+            self.get_column_collation(Thing._meta.db_table, "when"),
+            collation,
+        )
+        with connection.schema_editor() as editor:
+            editor.alter_field(Thing, new_field, old_field, strict=True)
+        self.assertEqual(self.get_primary_key(Thing._meta.db_table), "when")
+        self.assertIsNone(self.get_column_collation(Thing._meta.db_table, "when"))
 
     @skipUnlessDBFeature(
         "supports_collation_on_charfield", "supports_collation_on_textfield"

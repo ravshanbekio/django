@@ -1434,6 +1434,18 @@ class AggregateTestCase(TestCase):
         )
         self.assertTrue(publisher_qs.exists())
 
+    def test_aggregation_filter_exists(self):
+        publishers_having_more_than_one_book_qs = (
+            Book.objects.values("publisher")
+            .annotate(cnt=Count("isbn"))
+            .filter(cnt__gt=1)
+        )
+        query = publishers_having_more_than_one_book_qs.query.exists(
+            using=connection.alias
+        )
+        _, _, group_by = query.get_compiler(connection=connection).pre_sql_setup()
+        self.assertEqual(len(group_by), 1)
+
     def test_aggregation_exists_annotation(self):
         published_books = Book.objects.filter(publisher=OuterRef("pk"))
         publisher_qs = Publisher.objects.annotate(
@@ -1825,7 +1837,7 @@ class AggregateTestCase(TestCase):
             default=datetime.time(17),
         )
         if connection.vendor == "mysql":
-            # Workaround for #30224 for MySQL 8.0+ & MariaDB.
+            # Workaround for #30224 for MySQL & MariaDB.
             expr.default = Cast(expr.default, TimeField())
         queryset = Book.objects.annotate(oldest_store_opening=expr).order_by("isbn")
         self.assertSequenceEqual(
@@ -1875,7 +1887,7 @@ class AggregateTestCase(TestCase):
     def test_aggregation_default_using_date_from_python(self):
         expr = Min("book__pubdate", default=datetime.date(1970, 1, 1))
         if connection.vendor == "mysql":
-            # Workaround for #30224 for MySQL 5.7+ & MariaDB.
+            # Workaround for #30224 for MySQL & MariaDB.
             expr.default = Cast(expr.default, DateField())
         queryset = Publisher.objects.annotate(earliest_pubdate=expr).order_by("name")
         self.assertSequenceEqual(
@@ -1926,7 +1938,7 @@ class AggregateTestCase(TestCase):
             default=datetime.datetime(1970, 1, 1),
         )
         if connection.vendor == "mysql":
-            # Workaround for #30224 for MySQL 8.0+ & MariaDB.
+            # Workaround for #30224 for MySQL & MariaDB.
             expr.default = Cast(expr.default, DateTimeField())
         queryset = Book.objects.annotate(oldest_store_opening=expr).order_by("isbn")
         self.assertSequenceEqual(
